@@ -1,0 +1,156 @@
+@page "/group"
+@attribute [Authorize]
+
+<h1>Your circle</h1>
+<p class="subtitle">Share commitment, not diary details. Busy-only blocks show as "Busy" to everyone else.</p>
+
+<div class="two-col">
+    <div class="card form">
+        <h2>Create a circle</h2>
+        <label>Name
+            <InputText @bind-Value="newGroupName" placeholder="Study crew" />
+        </label>
+        <button class="btn primary" @onclick="CreateGroup" disabled="@(busy)">Create</button>
+    </div>
+
+    <div class="card form">
+        <h2>Join with invite code</h2>
+        <label>Invite code
+            <InputText @bind-Value="joinCode" placeholder="e.g. 4F2A9C1B" />
+        </label>
+        <button class="btn primary" @onclick="JoinGroup" disabled="@(busy)">Join</button>
+    </div>
+</div>
+
+@if (formError is not null)
+{
+    <p class="error">@formError</p>
+}
+
+<div class="card">
+    <h2>Settings</h2>
+    <div class="form row">
+        <label>Daily capacity (hours of focused work you can honestly plan)
+            <InputNumber @bind-Value="capacity" min="1" max="24" step="0.5" />
+        </label>
+        <label class="check">
+            <InputCheckbox @bind-Value="accountability" />
+            Allow group-visible "missed" marks (muted accountability)
+        </label>
+        <button class="btn primary" @onclick="SaveSettings" disabled="@(busy)">Save settings</button>
+    </div>
+</div>
+
+@foreach (var group in groups)
+{
+    <div class="card">
+        <div class="group-head">
+            <h2>@group.Name</h2>
+            <div class="invite-box">
+                <span class="muted">Invite code</span>
+                <code>@group.InviteCode</code>
+                <button class="btn small ghost" @onclick="@(async _ => await RegenerateAsync(group.Id))">Regenerate</button>
+            </div>
+        </div>
+        <ul class="member-list">
+            @foreach (var member in group.Members)
+            {
+                <li>
+                    <span class="member-name">@member.DisplayName</span>
+                    <span class="badge role">@member.Role</span>
+                </li>
+            }
+        </ul>
+    </div>
+}
+
+@code {
+    private string newGroupName = "";
+    private string joinCode = "";
+    private string? formError;
+    private bool busy;
+
+    private double capacity = 8;
+    private bool accountability;
+
+    private List<GroupDto> groups = new();
+
+    [Inject] private ApiClient Api { get; set; } = null!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        var me = await Api.MeAsync();
+        if (me is not null)
+        {
+            capacity = me.DailyCapacityHours;
+            accountability = me.AccountabilityOptIn;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        groups = await Api.MyGroupsAsync() ?? new();
+    }
+
+    private async Task CreateGroup()
+    {
+        formError = null;
+        if (string.IsNullOrWhiteSpace(newGroupName))
+        {
+            formError = "Give the circle a name.";
+            return;
+        }
+
+        try
+        {
+            await Api.CreateGroupAsync(new CreateGroupRequest(newGroupName));
+            newGroupName = "";
+            await LoadAsync();
+        }
+        catch (ApiClient.ApiException ex)
+        {
+            formError = ex.Message;
+        }
+    }
+
+    private async Task JoinGroup()
+    {
+        formError = null;
+        if (string.IsNullOrWhiteSpace(joinCode))
+        {
+            formError = "Enter an invite code.";
+            return;
+        }
+
+        try
+        {
+            await Api.JoinGroupAsync(new JoinGroupRequest(joinCode));
+            joinCode = "";
+            await LoadAsync();
+        }
+        catch (ApiClient.ApiException ex)
+        {
+            formError = ex.StatusCode == 404 ? "No circle found for that code." : ex.Message;
+        }
+    }
+
+    private async Task RegenerateAsync(Guid groupId)
+    {
+        await Api.RegenerateInviteAsync(groupId);
+        await LoadAsync();
+    }
+
+    private async Task SaveSettings()
+    {
+        formError = null;
+        try
+        {
+            await Api.UpdateSettingsAsync(new UpdateSettingsRequest(capacity, accountability));
+        }
+        catch (ApiClient.ApiException ex)
+        {
+            formError = ex.Message;
+        }
+    }
+}

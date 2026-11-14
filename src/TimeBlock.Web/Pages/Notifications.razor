@@ -1,0 +1,64 @@
+@page "/notifications"
+@attribute [Authorize]
+
+<div class="page-head">
+    <h1>Notifications</h1>
+    <button class="btn ghost" @onclick="MarkAllRead" disabled="@(unreadCount == 0)">Mark all read</button>
+</div>
+
+@if (notifications.Count == 0)
+{
+    <div class="card">
+        <p class="muted">Nothing yet. When a block ends unconfirmed, you'll get a gentle nudge here.</p>
+    </div>
+}
+
+@foreach (var notification in notifications)
+{
+    var id = notification.Id;
+    <div class="card notification @(!notification.IsRead ? "unread" : "") @TypeClass(notification.Type)">
+        <div class="notification-body">
+            <span class="badge type">@notification.Type</span>
+            <span>@notification.Message</span>
+        </div>
+        <div class="notification-meta">
+            <span class="muted">@notification.CreatedAt.ToLocalTime().ToString("MMM d HH:mm")</span>
+            @if (!notification.IsRead)
+            {
+                <button class="btn small ghost" @onclick="@(async _ => await MarkReadAsync(id))">Mark read</button>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private List<NotificationDto> notifications = new();
+
+    private int unreadCount => notifications.Count(n => !n.IsRead);
+
+    [Inject] private ApiClient Api { get; set; } = null!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        notifications = await Api.NotificationsAsync() ?? new();
+    }
+
+    private async Task MarkReadAsync(Guid id)
+    {
+        await Api.MarkReadAsync(id);
+        notifications = await Api.NotificationsAsync() ?? new();
+    }
+
+    private async Task MarkAllRead()
+    {
+        await Api.MarkAllReadAsync();
+        notifications = await Api.NotificationsAsync() ?? new();
+    }
+
+    private static string TypeClass(string type) => type switch
+    {
+        "missed" or "group-missed" => "missed",
+        "reminder" => "reminder",
+        _ => ""
+    };
+}

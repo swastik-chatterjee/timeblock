@@ -1,0 +1,58 @@
+@page "/register"
+
+<h1>Create account</h1>
+<p class="subtitle">Joining a circle? Paste the invite code from a friend.</p>
+
+<form class="card form" @onsubmit="Submit">
+    <label>Email
+        <InputText @bind-Value="email" />
+    </label>
+    <label>Display name
+        <InputText @bind-Value="displayName" />
+    </label>
+    <label>Password (min 8 characters)
+        <InputText type="password" @bind-Value="password" />
+    </label>
+    <label>Invite code (optional)
+        <InputText @bind-Value="inviteCode" placeholder="e.g. 4F2A9C1B" />
+    </label>
+    @if (error is not null)
+    {
+        <p class="error">@error</p>
+    }
+    <button class="btn primary" type="submit" disabled="@(busy)">Create account</button>
+    <p class="muted">Already registered? <a href="login">Sign in</a>.</p>
+</form>
+
+@code {
+    private string email = "";
+    private string displayName = "";
+    private string password = "";
+    private string inviteCode = "";
+    private string? error;
+    private bool busy;
+
+    [Inject] private AuthStateProvider Auth { get; set; } = null!;
+    [Inject] private NavigationManager Navigation { get; set; } = null!;
+
+    private async Task Submit()
+    {
+        busy = true;
+        error = null;
+        try
+        {
+            if (await Auth.RegisterAsync(email, displayName, password, string.IsNullOrWhiteSpace(inviteCode) ? null : inviteCode))
+            {
+                Navigation.NavigateTo("/");
+            }
+        }
+        catch (ApiClient.ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

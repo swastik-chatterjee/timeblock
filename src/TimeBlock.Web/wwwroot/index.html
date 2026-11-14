@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TimeBlock</title>
+    <base href="/" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+</head>
+
+<body>
+    <div id="app">Loading TimeBlock&hellip;</div>
+
+    <script>
+        window.timeblock = {
+            getToken: () => localStorage.getItem('timeblock.token'),
+            setToken: (token) => localStorage.setItem('timeblock.token', token),
+            clearToken: () => localStorage.removeItem('timeblock.token')
+        };
+    </script>
+    <script src="_framework/blazor.webassembly.js"></script>
+</body>
+
+</html>

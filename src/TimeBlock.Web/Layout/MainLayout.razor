@@ -1,0 +1,36 @@
+@inherits LayoutComponentBase
+
+<div class="shell">
+    <aside class="sidebar">
+        <div class="brand">
+            <img src="favicon.svg" alt="" />
+            <span>TimeBlock</span>
+        </div>
+        <AuthorizeView>
+            <nav>
+                <NavLink href="/" Match="NavLinkMatch.All">Week grid</NavLink>
+                <NavLink href="templates">Rhythms</NavLink>
+                <NavLink href="group">Circle</NavLink>
+                <NavLink href="notifications">Notifications</NavLink>
+            </nav>
+            <div class="sidebar-footer">
+                <span class="user-name">@context.User.Identity?.Name</span>
+                <button class="btn ghost" @onclick="Logout">Sign out</button>
+            </div>
+        </AuthorizeView>
+    </aside>
+    <main class="content">
+        @Body
+    </main>
+</div>
+
+@code {
+    [Inject] private AuthStateProvider Auth { get; set; } = null!;
+    [Inject] private NavigationManager Navigation { get; set; } = null!;
+
+    private async Task Logout()
+    {
+        await Auth.LogoutAsync();
+        Navigation.NavigateTo("/login");
+    }
+}

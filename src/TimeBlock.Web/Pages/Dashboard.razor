@@ -1,0 +1,395 @@
+@page "/"
+@attribute [Authorize]
+@implements IAsyncDisposable
+@using TimeBlock.Core.Recurrence
+@inject ApiClient Api
+@inject AuthStateProvider Auth
+@inject TimelineClient Timeline
+
+<div class="page-head">
+    <div>
+        <h1>Week of @weekStart.ToString("MMM d")</h1>
+        <p class="subtitle">Your blocks next to your circle's.</p>
+    </div>
+    <div class="week-nav">
+        <button class="btn ghost" @onclick="@(async _ => await ShiftWeek(-7))">&larr; Prev</button>
+        <button class="btn ghost" @onclick="@(async _ => await ShiftWeek(0))">This week</button>
+        <button class="btn ghost" @onclick="@(async _ => await ShiftWeek(7))">Next &rarr;</button>
+    </div>
+</div>
+
+@if (loading)
+{
+    <p class="loading">Loading your week&hellip;</p>
+}
+else
+{
+    <div class="cards-row">
+        <div class="card stat-card">
+            <span class="stat-label">Follow-through this week</span>
+            <span class="stat-value @RateClass(currentWeek)">@FormatRate(currentWeek)</span>
+            <span class="stat-detail">@Summarize(currentWeek)</span>
+        </div>
+        <div class="card stat-card">
+            <span class="stat-label">Last week</span>
+            <span class="stat-value @RateClass(previousWeek)">@FormatRate(previousWeek)</span>
+            <span class="stat-detail">@Summarize(previousWeek)</span>
+        </div>
+        <div class="card stat-card">
+            <span class="stat-label">Overloaded days</span>
+            <span class="stat-value @(overloadedDays > 0 ? "bad" : "good")">@overloadedDays</span>
+            <span class="stat-detail">Planned hours vs your @capacity h/day capacity</span>
+        </div>
+    </div>
+
+    @if (overloadWarnings.Any())
+    {
+        <div class="card warning-card">
+            <strong>Overload warning</strong>
+            <ul>
+                @foreach (var load in overloadWarnings)
+                {
+                    <li>@load.Date.ToString("ddd MMM d"): @load.PlannedHours h planned vs @load.CapacityHours h capacity. Most slippage is bad estimation &mdash; trim this day.</li>
+                }
+            </ul>
+        </div>
+    }
+
+    @if (needsConfirmation.Any())
+    {
+        <div class="card">
+            <h2>Needs confirmation</h2>
+            <p class="muted">These blocks ended. Mark what actually happened &mdash; that's your follow-through rate.</p>
+            <div class="confirm-list">
+                @foreach (var block in needsConfirmation)
+                {
+                    var blockId = block.Id;
+                    <div class="confirm-row">
+                        <div>
+                            <strong>@block.Title</strong>
+                            <span class="muted"> &middot; @LocalStart(block).ToString("ddd HH:mm") &ndash; @LocalEnd(block).ToString("HH:mm")</span>
+                        </div>
+                        <div class="confirm-actions">
+                            <button class="btn small done" @onclick="@(async _ => await ConfirmAsync(blockId, BlockStatus.Done))">Done</button>
+                            <button class="btn small partial" @onclick="@(async _ => await ConfirmAsync(blockId, BlockStatus.PartiallyDone))">Partial</button>
+                            <button class="btn small skipped" @onclick="@(async _ => await ConfirmAsync(blockId, BlockStatus.Skipped))">Skipped</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    <div class="card grid-card">
+        <div class="legend">
+            <span class="legend-item"><span class="chip planned"></span>Planned</span>
+            <span class="legend-item"><span class="chip done"></span>Done</span>
+            <span class="legend-item"><span class="chip partial"></span>Partial</span>
+            <span class="legend-item"><span class="chip skipped"></span>Skipped</span>
+            <span class="legend-item"><span class="chip missed"></span>Missed</span>
+        </div>
+        <div class="week-grid">
+            <div class="hours-column">
+                @for (var hour = 0; hour < 24; hour++)
+                {
+                    var top = hour * HourHeight;
+                    <div class="hour-label" style="top:@(top)px">@hour:00</div>
+                }
+            </div>
+            @foreach (var day in Days)
+            {
+                <div class="day-column">
+                    <div class="day-header @OverloadClass(day)">
+                        <span class="day-name">@day.ToString("ddd d")</span>
+                        @if (dayLoads.TryGetValue(day, out var load))
+                        {
+                            <span class="load-chip">@load.PlannedHours/@load.CapacityHours h</span>
+                        }
+                    </div>
+                    <div class="day-body">
+                        @for (var hour = 1; hour < 24; hour++)
+                        {
+                            var lineTop = hour * HourHeight;
+                            <div class="hour-line" style="top:@(lineTop)px"></div>
+                        }
+                        @foreach (var block in BlocksOn(day))
+                        {
+                            <div class="block @StatusClass(block)" style="@BlockStyle(day, block)" title="@BlockTooltip(block)">
+                                <span class="block-owner">@block.OwnerName</span>
+                                <span class="block-title">@(block.Privacy == BlockPrivacy.BusyOnly && block.OwnerId != myId ? "Busy" : block.Title)</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Add a block</h2>
+        <form class="inline-form" @onsubmit="AddBlock">
+            <InputText @bind-Value="newTitle" placeholder="What are you doing?" />
+            <InputDate type="date" @bind-Value="newDate" />
+            <InputDate type="time" @bind-Value="newStart" />
+            <select @bind="newDurationHours">
+                <option value="0.5">30 min</option>
+                <option value="1">1 h</option>
+                <option value="1.5">1.5 h</option>
+                <option value="2">2 h</option>
+                <option value="3">3 h</option>
+            </select>
+            <select @bind="newPrivacy">
+                <option value="Details">Visible details</option>
+                <option value="BusyOnly">Busy only</option>
+            </select>
+            <select @bind="newGroupId">
+                <option value="">Only me</option>
+                @foreach (var group in groups)
+                {
+                    <option value="@group.Id">@group.Name</option>
+                }
+            </select>
+            <button class="btn primary" type="submit" disabled="@(busy)">Add</button>
+        </form>
+        @if (formError is not null)
+        {
+            <p class="error">@formError</p>
+        }
+    </div>
+}
+
+@code {
+    private const int HourHeight = 44;
+
+    private bool loading = true;
+    private bool busy;
+    private string? formError;
+
+    private DateOnly weekStart;
+    private Guid myId;
+    private double capacity = 8;
+
+    private List<GroupDto> groups = new();
+    private List<BlockDto> allBlocks = new();
+    private Dictionary<DateOnly, DayLoad> dayLoads = new();
+    private List<WeekFollowThroughDto> history = new();
+
+    private string newTitle = "";
+    private DateOnly newDate = DateOnly.FromDateTime(DateTime.Now);
+    private TimeOnly newStart = new(19, 0);
+    private double newDurationHours = 2;
+    private string newPrivacy = "Details";
+    private string newGroupId = "";
+
+    private WeekFollowThroughDto currentWeek => history.Count > 0 ? history[^1] : new(DateOnly.MinValue, 0, 0, 0, 0, 1);
+    private WeekFollowThroughDto previousWeek => history.Count > 1 ? history[^2] : new(DateOnly.MinValue, 0, 0, 0, 0, 1);
+    private int overloadedDays => dayLoads.Values.Count(l => l.Overloaded);
+    private IEnumerable<DayLoad> overloadWarnings => dayLoads.Values.Where(l => l.Overloaded);
+    private List<BlockDto> needsConfirmation => allBlocks
+        .Where(b => b.OwnerId == myId && b.Status == BlockStatus.Planned && b.EndUtc <= DateTime.UtcNow)
+        .OrderBy(b => b.StartUtc)
+        .ToList();
+
+    private IEnumerable<DateOnly> Days
+    {
+        get
+        {
+            for (var day = weekStart; day < weekStart.AddDays(7); day = day.AddDays(1))
+            {
+                yield return day;
+            }
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        weekStart = RecurrenceEngine.StartOfWeek(DateOnly.FromDateTime(DateTime.Now));
+        await LoadAsync();
+        await Timeline.EnsureStartedAsync();
+        Timeline.BlockChanged += OnBlockChanged;
+        if (groups.Count > 0)
+        {
+            await Timeline.SubscribeAsync(groups.Select(g => g.Id).ToList());
+        }
+    }
+
+    private void OnBlockChanged(BlockChangedEvent _) => InvokeAsync(async () => await LoadAsync());
+
+    private async Task ShiftWeek(int days)
+    {
+        weekStart = days == 0
+            ? RecurrenceEngine.StartOfWeek(DateOnly.FromDateTime(DateTime.Now))
+            : weekStart.AddDays(days);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        try
+        {
+            var from = weekStart;
+            var to = weekStart.AddDays(7);
+            var meTask = Api.MeAsync();
+            var groupsTask = Api.MyGroupsAsync();
+            var blocksTask = Api.MyBlocksAsync(from, to);
+            var loadsTask = Api.OverloadAsync(from, to.AddDays(-1));
+            var historyTask = Api.FollowThroughAsync(4);
+
+            await Task.WhenAll(meTask, groupsTask, blocksTask, loadsTask, historyTask);
+
+            var me = meTask.Result;
+            if (me is not null)
+            {
+                myId = me.Id;
+                capacity = me.DailyCapacityHours;
+            }
+
+            groups = groupsTask.Result ?? new();
+            var visible = new List<BlockDto>(blocksTask.Result ?? new());
+
+            foreach (var group in groups)
+            {
+                var timeline = await Api.GroupTimelineAsync(group.Id, from);
+                if (timeline is not null)
+                {
+                    visible.AddRange(timeline.Blocks.Where(b => b.OwnerId != myId));
+                }
+            }
+
+            allBlocks = visible;
+            dayLoads = (loadsTask.Result ?? new()).ToDictionary(l => l.Date);
+            history = historyTask.Result ?? new();
+        }
+        catch (ApiClient.ApiException)
+        {
+        }
+        finally
+        {
+            loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ConfirmAsync(Guid id, BlockStatus status)
+    {
+        try
+        {
+            await Api.UpdateBlockStatusAsync(id, status);
+            await LoadAsync();
+        }
+        catch (ApiClient.ApiException ex)
+        {
+            formError = ex.Message;
+        }
+    }
+
+    private async Task AddBlock()
+    {
+        formError = null;
+        if (string.IsNullOrWhiteSpace(newTitle))
+        {
+            formError = "Give the block a title.";
+            return;
+        }
+
+        var local = new DateTime(newDate, newStart, DateTimeKind.Unspecified);
+        var startUtc = TimeZoneInfo.ConvertTimeToUtc(local, TimeZoneInfo.Local);
+        var request = new CreateBlockRequest(
+            newTitle,
+            "",
+            newPrivacy == "BusyOnly" ? BlockPrivacy.BusyOnly : BlockPrivacy.Details,
+            startUtc,
+            startUtc.AddHours(newDurationHours),
+            string.IsNullOrWhiteSpace(newGroupId) ? null : Guid.Parse(newGroupId));
+
+        try
+        {
+            await Api.CreateBlockAsync(request);
+            newTitle = "";
+            await LoadAsync();
+        }
+        catch (ApiClient.ApiException ex)
+        {
+            formError = ex.Message;
+        }
+    }
+
+    private IEnumerable<BlockDto> BlocksOn(DateOnly day)
+    {
+        var dayStart = day.ToDateTime(TimeOnly.MinValue);
+        var dayEnd = day.AddDays(1).ToDateTime(TimeOnly.MinValue);
+        return allBlocks
+            .Where(b =>
+            {
+                var local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(b.StartUtc, DateTimeKind.Utc), TimeZoneInfo.Local);
+                return local >= dayStart && local < dayEnd;
+            });
+    }
+
+    private string BlockStyle(DateOnly day, BlockDto block)
+    {
+        var dayStart = day.ToDateTime(TimeOnly.MinValue);
+        var start = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(block.StartUtc, DateTimeKind.Utc), TimeZoneInfo.Local);
+        var end = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(block.EndUtc, DateTimeKind.Utc), TimeZoneInfo.Local);
+        var top = Math.Max(0, (start - dayStart).TotalMinutes / 60.0 * HourHeight);
+        var bottom = Math.Min(24 * HourHeight, (end - dayStart).TotalMinutes / 60.0 * HourHeight);
+        var height = Math.Max(16, bottom - top);
+        var hue = Math.Abs(block.OwnerId.GetHashCode()) % 360;
+        return $"top:{top:0}px;height:{height:0}px;--owner-hue:{hue};";
+    }
+
+    private string BlockTooltip(BlockDto block)
+    {
+        var status = block.Status switch
+        {
+            BlockStatus.Planned => "planned",
+            BlockStatus.Done => "done",
+            BlockStatus.PartiallyDone => "partially done",
+            BlockStatus.Skipped => "skipped",
+            _ => "missed"
+        };
+        return $"{block.OwnerName}: {block.Title} ({status}) {LocalStart(block):HH:mm}-{LocalEnd(block):HH:mm}";
+    }
+
+    private DateTime LocalStart(BlockDto block) =>
+        TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(block.StartUtc, DateTimeKind.Utc), TimeZoneInfo.Local);
+
+    private DateTime LocalEnd(BlockDto block) =>
+        TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(block.EndUtc, DateTimeKind.Utc), TimeZoneInfo.Local);
+
+    private string StatusClass(BlockDto block) => block.Status switch
+    {
+        BlockStatus.Done => "done",
+        BlockStatus.PartiallyDone => "partial",
+        BlockStatus.Skipped => "skipped",
+        BlockStatus.Missed => "missed",
+        _ => "planned"
+    };
+
+    private string OverloadClass(DateOnly day) =>
+        dayLoads.TryGetValue(day, out var load) && load.Overloaded ? "overloaded" : "";
+
+    private static string FormatRate(WeekFollowThroughDto week) =>
+        week.Done + week.PartiallyDone + week.Skipped + week.Missed == 0 ? "—" : $"{week.Rate * 100:0}%";
+
+    private static string Summarize(WeekFollowThroughDto week) =>
+        $"{week.Done} done, {week.PartiallyDone} partial, {week.Skipped} skipped, {week.Missed} missed";
+
+    private static string RateClass(WeekFollowThroughDto week)
+    {
+        if (week.Done + week.PartiallyDone + week.Skipped + week.Missed == 0)
+        {
+            return "";
+        }
+
+        return week.Rate >= 0.8 ? "good" : week.Rate >= 0.5 ? "meh" : "bad";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Timeline.BlockChanged -= OnBlockChanged;
+        await Task.CompletedTask;
+    }
+}

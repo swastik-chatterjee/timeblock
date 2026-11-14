@@ -1,0 +1,54 @@
+@page "/login"
+
+<h1>Sign in</h1>
+<p class="subtitle">Plan your week where your circle can see it.</p>
+
+<form class="card form" @onsubmit="Submit">
+    <label>Email
+        <InputText @bind-Value="email" />
+    </label>
+    <label>Password
+        <InputText type="password" @bind-Value="password" />
+    </label>
+    @if (error is not null)
+    {
+        <p class="error">@error</p>
+    }
+    <button class="btn primary" type="submit" disabled="@(busy)">Sign in</button>
+    <p class="muted">No account? <a href="register">Create one</a>. Got an invite code? Use it when you register.</p>
+</form>
+
+@code {
+    private string email = "";
+    private string password = "";
+    private string? error;
+    private bool busy;
+
+    [Inject] private AuthStateProvider Auth { get; set; } = null!;
+    [Inject] private NavigationManager Navigation { get; set; } = null!;
+
+    private async Task Submit()
+    {
+        busy = true;
+        error = null;
+        try
+        {
+            if (await Auth.LoginAsync(email, password))
+            {
+                Navigation.NavigateTo("/");
+            }
+            else
+            {
+                error = "Wrong email or password.";
+            }
+        }
+        catch (ApiClient.ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}
