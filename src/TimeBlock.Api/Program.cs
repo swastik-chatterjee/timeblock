@@ -18,8 +18,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var databaseProvider = builder.Configuration["Database:Provider"] ?? "Postgres";
-var connectionString = builder.Configuration.GetConnectionString("Default")
-    ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured. Set it in .env or the environment.");
+var connectionString = NpgsqlConnectionString.Normalize(builder.Configuration.GetConnectionString("Default")
+    ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured. Set it in .env or the environment."));
 
 builder.Services.AddDbContext<TimeBlockDbContext>(options =>
 {

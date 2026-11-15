@@ -25,9 +25,11 @@ Everyone in your circle posts what they're doing **when**, not just what. The co
 The app reads standard .NET configuration. For a remote PostgreSQL, set the connection string via environment variable or a `.env` file next to the app (see `.env.example`):
 
 ```
-ConnectionStrings__Default=Host=your-db-host;Port=5432;Database=timeblock;Username=timeblock;Password=change-me
+ConnectionStrings__Default=Host=localhost;Port=5432;Database=timeblock;Username=postgres;Password=postgres
 Jwt__Key=replace-with-a-long-random-signing-key
 ```
+
+URL-form connection strings (`postgresql://user:password@host:5432/dbname`, as handed out by most managed Postgres providers) are accepted too and converted automatically.
 
 A tiny built-in loader picks up `.env` keys (existing environment variables win). Other useful keys: `Database__Provider` (`Postgres` default, `Sqlite` for tests), `Worker__Enabled`.
 
