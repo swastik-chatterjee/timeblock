@@ -1,204 +1,199 @@
-@page "/templates"
+@page "/group"
 @attribute [Authorize]
-@using TimeBlock.Core.Recurrence
 
-<h1>Recurring rhythms</h1>
-<p class="subtitle">Set it once &mdash; "Gym Mon/Wed/Fri 6am" &mdash; then just confirm each occurrence.</p>
+<h1>Your circle</h1>
+<p class="subtitle">Share commitment, not diary details. Busy-only blocks show as "Busy" to everyone else.</p>
 
-<div class="card form">
-    <h2>New rhythm</h2>
-    <label>Title
-        <InputText @bind-Value="title" placeholder="Study" />
-    </label>
-    <label>Category
-        <InputText @bind-Value="category" placeholder="study / gym / ..." />
-    </label>
-    <label>Start time
-        <InputDate type="time" @bind-Value="startTime" />
-    </label>
-    <label>Duration
-        <select @bind="durationMinutes">
-            <option value="30">30 min</option>
-            <option value="60">1 h</option>
-            <option value="90">1.5 h</option>
-            <option value="120">2 h</option>
-            <option value="180">3 h</option>
-        </select>
-    </label>
-    <label>Days
-        <div class="day-picker">
-            @foreach (var day in DayOptions)
-            {
-                <label class="day-toggle">
-                    <input type="checkbox" @bind="day.Selected" />
-                    @day.Label
-                </label>
-            }
-        </div>
-    </label>
-    <label>Privacy
-        <select @bind="privacy">
-            <option value="Details">Visible details</option>
-            <option value="BusyOnly">Busy only</option>
-        </select>
-    </label>
-    <label>Share with circle
-        <select @bind="groupId">
-            <option value="">Only me</option>
-            @foreach (var group in groups)
-            {
-                <option value="@group.Id">@group.Name</option>
-            }
-        </select>
-    </label>
-    <label>Time zone
-        <InputText @bind-Value="timeZoneId" placeholder="UTC, Europe/Berlin, America/New_York..." />
-    </label>
-    @if (formError is not null)
-    {
-        <p class="error">@formError</p>
-    }
-    <button class="btn primary" @onclick="Create" disabled="@(busy)">Create rhythm</button>
-</div>
+<div class="two-col">
+    <div class="card form">
+        <h2>Create a circle</h2>
+        <label>Name
+            <InputText @bind-Value="newGroupName" placeholder="Study crew" />
+        </label>
+        <button class="btn primary" @onclick="CreateGroup" disabled="@(busy)">Create</button>
+    </div>
 
-<div class="card">
-    <h2>Your rhythms</h2>
-    @if (templates.Count == 0)
-    {
-        <p class="muted">No rhythms yet. Create one above &mdash; occurrences appear on your week grid automatically.</p>
-    }
-    <div class="template-list">
-        @foreach (var template in templates)
-        {
-            var templateId = template.Id;
-            <div class="template-row">
-                <div>
-                    <strong>@template.Title</strong>
-                    <span class="muted"> &middot; @Describe(template)</span>
-                    @if (template.GroupId.HasValue)
-                    {
-                        <span class="badge shared">shared</span>
-                    }
-                    @if (template.Privacy == BlockPrivacy.BusyOnly)
-                    {
-                        <span class="badge">busy only</span>
-                    }
-                </div>
-                <button class="btn small danger" @onclick="@(async _ => await DeleteAsync(templateId))">Delete</button>
-            </div>
-        }
+    <div class="card form">
+        <h2>Join with invite code</h2>
+        <label>Invite code
+            <InputText @bind-Value="joinCode" placeholder="e.g. 4F2A9C1B" />
+        </label>
+        <button class="btn primary" @onclick="JoinGroup" disabled="@(busy)">Join</button>
     </div>
 </div>
 
+@if (formError is not null)
+{
+    <p class="error">@formError</p>
+}
+
+<div class="card">
+    <h2>Settings</h2>
+    <div class="form row">
+        <label>Daily capacity (hours of focused work you can honestly plan)
+            <InputNumber @bind-Value="capacity" min="1" max="24" step="0.5" />
+        </label>
+        <label class="check">
+            <InputCheckbox @bind-Value="accountability" />
+            Allow group-visible "missed" marks (muted accountability)
+        </label>
+        <button class="btn primary" @onclick="SaveSettings" disabled="@(busy)">Save settings</button>
+    </div>
+</div>
+
+@foreach (var group in groups)
+{
+    <div class="card">
+        <div class="group-head">
+            <h2>@group.Name</h2>
+            <div class="invite-box">
+                <span class="muted">Invite code</span>
+                <code>@group.InviteCode</code>
+                <button class="btn small ghost" @onclick="@(async _ => await RegenerateAsync(group.Id))">Regenerate</button>
+            </div>
+        </div>
+        <ul class="member-list">
+            @foreach (var member in group.Members)
+            {
+                <li>
+                    <span class="member-name">@member.DisplayName</span>
+                    <span class="badge role">@member.Role</span>
+                </li>
+            }
+        </ul>
+    </div>
+}
+
 @code {
-    private string title = "";
-    private string category = "";
-    private TimeOnly startTime = new(19, 0);
-    private int durationMinutes = 120;
-    private string privacy = "Details";
-    private string groupId = "";
-    private string timeZoneId = "";
+    private string newGroupName = "";
+    private string joinCode = "";
     private string? formError;
     private bool busy;
 
+    private double capacity = 8;
+    private bool accountability;
+
     private List<GroupDto> groups = new();
-    private List<TemplateDto> templates = new();
-
-    private sealed record DayOption(string Code, string Label)
-    {
-        public bool Selected { get; set; }
-    }
-
-    private List<DayOption> DayOptions { get; } = new()
-    {
-        new("MO", "Mon"),
-        new("TU", "Tue"),
-        new("WE", "Wed"),
-        new("TH", "Thu"),
-        new("FR", "Fri"),
-        new("SA", "Sat"),
-        new("SU", "Sun")
-    };
 
     [Inject] private ApiClient Api { get; set; } = null!;
 
     protected override async Task OnInitializedAsync()
     {
+        await LoadAsync();
+        var me = await Api.MeAsync();
+        if (me is not null)
+        {
+            capacity = me.DailyCapacityHours;
+            accountability = me.AccountabilityOptIn;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
         groups = await Api.MyGroupsAsync() ?? new();
-        templates = await Api.MyTemplatesAsync() ?? new();
     }
 
-    private static string Describe(TemplateDto template)
+    private async Task CreateGroup()
     {
-        var days = RecurrenceDays(template.Rrule);
-        var end = template.StartTime.AddMinutes(template.DurationMinutes);
-        var endText = end < template.StartTime ? "24:00" : end.ToString("HH:mm");
-        return $"{days} {template.StartTime:HH\\:mm}-{endText}";
-    }
-
-    private static string RecurrenceDays(string rrule)
-    {
-        var byDay = rrule.Split(';', StringSplitOptions.RemoveEmptyEntries)
-            .Select(p => p.Split('=', 2))
-            .Where(kv => kv.Length == 2 && kv[0].Equals("BYDAY", StringComparison.OrdinalIgnoreCase))
-            .Select(kv => kv[1])
-            .FirstOrDefault();
-        if (string.IsNullOrEmpty(byDay))
+        if (busy)
         {
-            return rrule.Contains("DAILY", StringComparison.OrdinalIgnoreCase) ? "Every day" : "Weekly";
+            return;
         }
 
-        var names = new Dictionary<string, string>
-        {
-            ["MO"] = "Mon", ["TU"] = "Tue", ["WE"] = "Wed", ["TH"] = "Thu", ["FR"] = "Fri", ["SA"] = "Sat", ["SU"] = "Sun"
-        };
-        return string.Join(", ", byDay.Split(',').Select(d => names.TryGetValue(d.Trim(), out var name) ? name : d));
-    }
-
-    private async Task Create()
-    {
         formError = null;
-        if (string.IsNullOrWhiteSpace(title))
+        if (string.IsNullOrWhiteSpace(newGroupName))
         {
-            formError = "Give the rhythm a title.";
+            formError = "Give the circle a name.";
             return;
         }
 
-        var selectedDays = DayOptions.Where(d => d.Selected).Select(d => d.Code).ToList();
-        if (selectedDays.Count == 0)
-        {
-            formError = "Pick at least one day.";
-            return;
-        }
-
-        var request = new CreateTemplateRequest(
-            title,
-            category,
-            privacy == "BusyOnly" ? BlockPrivacy.BusyOnly : BlockPrivacy.Details,
-            string.IsNullOrWhiteSpace(groupId) ? null : Guid.Parse(groupId),
-            $"FREQ=WEEKLY;BYDAY={string.Join(",", selectedDays)}",
-            startTime,
-            durationMinutes,
-            DateOnly.FromDateTime(DateTime.Now),
-            null,
-            string.IsNullOrWhiteSpace(timeZoneId) ? "UTC" : timeZoneId);
-
+        busy = true;
         try
         {
-            await Api.CreateTemplateAsync(request);
-            title = "";
-            category = "";
-            templates = await Api.MyTemplatesAsync() ?? new();
+            await Api.CreateGroupAsync(new CreateGroupRequest(newGroupName));
+            newGroupName = "";
+            await LoadAsync();
         }
         catch (ApiClient.ApiException ex)
         {
             formError = ex.Message;
         }
+        finally
+        {
+            busy = false;
+        }
     }
 
-    private async Task DeleteAsync(Guid id)
+    private async Task JoinGroup()
     {
-        await Api.DeleteTemplateAsync(id);
-        templates = await Api.MyTemplatesAsync() ?? new();
+        if (busy)
+        {
+            return;
+        }
+
+        formError = null;
+        if (string.IsNullOrWhiteSpace(joinCode))
+        {
+            formError = "Enter an invite code.";
+            return;
+        }
+
+        busy = true;
+        try
+        {
+            await Api.JoinGroupAsync(new JoinGroupRequest(joinCode));
+            joinCode = "";
+            await LoadAsync();
+        }
+        catch (ApiClient.ApiException ex)
+        {
+            formError = ex.StatusCode == 404 ? "No circle found for that code." : ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task RegenerateAsync(Guid groupId)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        try
+        {
+            await Api.RegenerateInviteAsync(groupId);
+            await LoadAsync();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task SaveSettings()
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        formError = null;
+        busy = true;
+        try
+        {
+            await Api.UpdateSettingsAsync(new UpdateSettingsRequest(capacity, accountability));
+        }
+        catch (ApiClient.ApiException ex)
+        {
+            formError = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 }

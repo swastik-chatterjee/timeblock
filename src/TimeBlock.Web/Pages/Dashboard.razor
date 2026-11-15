@@ -274,6 +274,12 @@ else
 
     private async Task ConfirmAsync(Guid id, BlockStatus status)
     {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
         try
         {
             await Api.UpdateBlockStatusAsync(id, status);
@@ -283,10 +289,19 @@ else
         {
             formError = ex.Message;
         }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private async Task AddBlock()
     {
+        if (busy)
+        {
+            return;
+        }
+
         formError = null;
         if (string.IsNullOrWhiteSpace(newTitle))
         {
@@ -294,18 +309,19 @@ else
             return;
         }
 
-        var local = new DateTime(newDate, newStart, DateTimeKind.Unspecified);
-        var startUtc = TimeZoneInfo.ConvertTimeToUtc(local, TimeZoneInfo.Local);
-        var request = new CreateBlockRequest(
-            newTitle,
-            "",
-            newPrivacy == "BusyOnly" ? BlockPrivacy.BusyOnly : BlockPrivacy.Details,
-            startUtc,
-            startUtc.AddHours(newDurationHours),
-            string.IsNullOrWhiteSpace(newGroupId) ? null : Guid.Parse(newGroupId));
-
+        busy = true;
         try
         {
+            var local = new DateTime(newDate, newStart, DateTimeKind.Unspecified);
+            var startUtc = TimeZoneInfo.ConvertTimeToUtc(local, TimeZoneInfo.Local);
+            var request = new CreateBlockRequest(
+                newTitle,
+                "",
+                newPrivacy == "BusyOnly" ? BlockPrivacy.BusyOnly : BlockPrivacy.Details,
+                startUtc,
+                startUtc.AddHours(newDurationHours),
+                string.IsNullOrWhiteSpace(newGroupId) ? null : Guid.Parse(newGroupId));
+
             await Api.CreateBlockAsync(request);
             newTitle = "";
             await LoadAsync();
@@ -313,6 +329,10 @@ else
         catch (ApiClient.ApiException ex)
         {
             formError = ex.Message;
+        }
+        finally
+        {
+            busy = false;
         }
     }
 
