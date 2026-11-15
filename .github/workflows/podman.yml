@@ -1,0 +1,60 @@
+name: Podman CI and publish
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test-build-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Podman
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+
+      - name: Verify Podman
+        run: podman --version
+
+      - name: Run tests in a .NET SDK container
+        run: >-
+          podman run --rm
+          -v "${GITHUB_WORKSPACE}:/src:Z"
+          -w /src
+          mcr.microsoft.com/dotnet/sdk:8.0
+          dotnet test TimeBlock.sln --configuration Release
+
+      - name: Build deployable image
+        run: podman build -t ghcr.io/swastik-chatterjee/timeblock:${GITHUB_SHA} .
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GH_TOKEN" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Publish image
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          image=ghcr.io/swastik-chatterjee/timeblock
+
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            version="${GITHUB_REF#refs/tags/}"
+            podman tag "${image}:${GITHUB_SHA}" "${image}:${version}"
+            podman push "${image}:${version}"
+          else
+            podman tag "${image}:${GITHUB_SHA}" "${image}:latest"
+            podman push "${image}:${GITHUB_SHA}"
+            podman push "${image}:latest"
+          fi
