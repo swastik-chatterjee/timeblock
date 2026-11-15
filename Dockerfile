@@ -5,6 +5,7 @@ COPY TimeBlock.sln ./
 COPY src/TimeBlock.Core/TimeBlock.Core.csproj src/TimeBlock.Core/
 COPY src/TimeBlock.Api/TimeBlock.Api.csproj src/TimeBlock.Api/
 COPY src/TimeBlock.Web/TimeBlock.Web.csproj src/TimeBlock.Web/
+COPY src/TimeBlock.Tests/TimeBlock.Tests.csproj src/TimeBlock.Tests/
 RUN dotnet restore TimeBlock.sln
 
 COPY src/ src/
