@@ -4,7 +4,7 @@ global using TimeBlock.Core.Contracts;
 
 namespace TimeBlock.Web.Services;
 
-public class ApiClient(HttpClient http, AuthStateProvider auth)
+public class ApiClient(HttpClient http, TokenStorage storage)
 {
     public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -38,11 +38,11 @@ public class ApiClient(HttpClient http, AuthStateProvider auth)
 
     private async Task<HttpResponseMessage> RawAsync(HttpMethod method, string url, object? body)
     {
-        await auth.InitializeAsync();
         var request = new HttpRequestMessage(method, url);
-        if (auth.Token is not null)
+        var token = await TryGetTokenAsync();
+        if (!string.IsNullOrWhiteSpace(token))
         {
-            request.Headers.Authorization = new("Bearer", auth.Token);
+            request.Headers.Authorization = new("Bearer", token);
         }
 
         if (body is not null)
@@ -51,6 +51,18 @@ public class ApiClient(HttpClient http, AuthStateProvider auth)
         }
 
         return await http.SendAsync(request);
+    }
+
+    private async Task<string?> TryGetTokenAsync()
+    {
+        try
+        {
+            return await storage.GetAsync();
+        }
+        catch (JSException)
+        {
+            return null;
+        }
     }
 
     private static async Task<string> DescribeAsync(HttpResponseMessage response)
