@@ -47,11 +47,11 @@ Without a Postgres handy, you can smoke-test against SQLite:
 Database__Provider=Sqlite ConnectionStrings__Default="Data Source=timeblock.db" dotnet run --project src/TimeBlock.Api
 ```
 
-## Docker
+## Podman
 
 ```bash
-docker build -t timeblock .
-docker run --rm -p 8080:8080 --env-file .env timeblock
+podman build -t timeblock .
+podman run --rm -p 8080:8080 --env-file .env timeblock
 ```
 
 The container applies EF migrations on startup against the `ConnectionStrings__Default` Postgres.
