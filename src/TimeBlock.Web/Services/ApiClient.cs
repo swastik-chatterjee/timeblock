@@ -1,6 +1,7 @@
 global using System.Net.Http.Json;
 global using System.Text.Json;
 global using TimeBlock.Core.Contracts;
+using Microsoft.JSInterop;
 
 namespace TimeBlock.Web.Services;
 
